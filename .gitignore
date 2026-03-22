@@ -1,14 +1,3 @@
-# dependencies
 node_modules/
-
-# env files
 .env
-*.env
-
-# build outputs
-dist/
-build/
-
-# system junk
-.DS_Store
-Thumbs.db
+.env.local
