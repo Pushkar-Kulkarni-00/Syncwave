@@ -21,6 +21,8 @@ html, body, #root {
   color: var(--text);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
+  /* Prevent iOS rubber-band scrolling from breaking fixed elements */
+  overscroll-behavior: none;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -30,12 +32,30 @@ button {
   cursor: pointer;
   border: none;
   outline: none;
+  /* Remove iOS default button styling */
+  -webkit-appearance: none;
+  appearance: none;
+  /* Remove tap flash on mobile */
+  -webkit-tap-highlight-color: transparent;
+  /* Ensure minimum touch target of 44px (Apple HIG) */
+  min-height: 36px;
+  touch-action: manipulation;
 }
 
 input {
   font-family: var(--font);
   outline: none;
   border: none;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  /* Prevent iOS zoom on focus (font must be >=16px) */
+  font-size: 16px;
+}
+
+/* Override font-size back to design size only on desktop */
+@media (min-width: 640px) {
+  input { font-size: inherit; }
 }
 
 ::-webkit-scrollbar { width: 4px; }
@@ -62,3 +82,9 @@ input {
 }
 
 .fade-in { animation: fadeIn 0.4s ease both; }
+
+/* ── Mobile utility classes ──────────────────────────────────────────────── */
+
+/* Safe area padding for notched phones (iPhone X+) */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-top    { padding-top:    env(safe-area-inset-top,    0px); }

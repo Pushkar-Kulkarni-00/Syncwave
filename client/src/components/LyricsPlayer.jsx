@@ -1,25 +1,20 @@
 /**
- * LyricsPlayer.jsx
- * Displays synced lyrics received from the server (via LRCLIB).
- * Highlights the current line based on positionMs and auto-scrolls to it.
- * Falls back to a "No lyrics found" message if lyrics is null.
+ * LyricsPlayer.jsx — Mobile optimised
+ * - Height uses dvh (dynamic viewport height) to account for iOS Safari address bar
+ * - Scroll is internal to the container only (no page scroll hijacking)
+ * - Font sizes scale down on small screens
  */
 import React, { useEffect, useRef, useState } from "react";
 
 export default function LyricsPlayer({ lyrics, positionMs, isPlaying, track }) {
   const [currentIndex, setCurrentIndex] = useState(-1);
-  const containerRef  = useRef(null);
-  const lineRefs      = useRef([]);
-  const intervalRef   = useRef(null);
-  // Local position that interpolates between server ticks
-  const localPos      = useRef(positionMs || 0);
+  const containerRef = useRef(null);
+  const lineRefs     = useRef([]);
+  const intervalRef  = useRef(null);
+  const localPos     = useRef(positionMs || 0);
 
-  // Sync local position when server sends an update
-  useEffect(() => {
-    localPos.current = positionMs || 0;
-  }, [positionMs]);
+  useEffect(() => { localPos.current = positionMs || 0; }, [positionMs]);
 
-  // Advance local position every 100ms for smooth highlighting
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (!lyrics?.length) return;
@@ -27,10 +22,9 @@ export default function LyricsPlayer({ lyrics, positionMs, isPlaying, track }) {
     intervalRef.current = setInterval(() => {
       if (isPlaying) localPos.current += 100;
 
-      // Find which line we're on
       let idx = -1;
       for (let i = 0; i < lyrics.length; i++) {
-        if (localPos.current >= lyrics[i].time+1500) idx = i;
+        if (localPos.current >= lyrics[i].time + 1500) idx = i;
         else break;
       }
       setCurrentIndex(idx);
@@ -39,36 +33,28 @@ export default function LyricsPlayer({ lyrics, positionMs, isPlaying, track }) {
     return () => clearInterval(intervalRef.current);
   }, [lyrics, isPlaying]);
 
-  // Auto-scroll to current line
+  // Scroll only inside the container — never the page
   useEffect(() => {
-    if (currentIndex < 0 || !lineRefs.current[currentIndex]) return;
+    if (currentIndex < 0) return;
     const container = containerRef.current;
-const line = lineRefs.current[currentIndex];
-if (container && line) {
-  const containerTop = container.getBoundingClientRect().top;
-  const lineTop = line.getBoundingClientRect().top;
-  const offset = lineTop - containerTop - (container.clientHeight / 2) + (line.clientHeight / 2);
-  container.scrollTop += offset;
-}
+    const line = lineRefs.current[currentIndex];
+    if (container && line) {
+      const containerTop = container.getBoundingClientRect().top;
+      const lineTop = line.getBoundingClientRect().top;
+      const offset = lineTop - containerTop - (container.clientHeight / 2) + (line.clientHeight / 2);
+      container.scrollTop += offset;
+    }
   }, [currentIndex]);
 
-  // No lyrics available
   if (!lyrics || lyrics.length === 0) {
     return (
       <div style={{
-        display:        "flex",
-        flexDirection:  "column",
-        alignItems:     "center",
-        justifyContent: "center",
-        minHeight:      320,
-        background:     "var(--surface)",
-        border:         "1px solid var(--border)",
-        borderRadius:   "var(--radius)",
-        color:          "var(--muted)",
-        fontSize:       14,
-        gap:            12,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        minHeight: 220,
+        background: "var(--surface)", border: "1px solid var(--border)",
+        borderRadius: "var(--radius)", color: "var(--muted)", fontSize: 14, gap: 10,
       }}>
-        <span style={{ fontSize: 32 }}>🎵</span>
+        <span style={{ fontSize: 28 }}>🎵</span>
         <span>No lyrics found for this song</span>
       </div>
     );
@@ -78,32 +64,37 @@ if (container && line) {
     <div
       ref={containerRef}
       style={{
-        height:       420,
-        overflowY:    "auto",
-        background:   "var(--surface)",
-        border:       "1px solid var(--border)",
+        // Use min/max so it works on both big and small screens
+        height: "min(420px, 50dvh)",
+        overflowY: "auto",
+        overflowX: "hidden",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
         borderRadius: "var(--radius)",
-        padding:      "32px 24px",
-        scrollbarWidth: "none", // Firefox
+        padding: "24px 16px",
+        // Prevent this scroll container from propagating scroll to page on iOS
+        WebkitOverflowScrolling: "touch",
+        scrollbarWidth: "none",
+        msOverflowStyle: "none",
       }}
     >
-      <style>{`
-        .lyrics-container::-webkit-scrollbar { display: none; }
-      `}</style>
+      <style>{`.lyrics-scroll::-webkit-scrollbar { display: none; }`}</style>
 
-      <div className="lyrics-container">
+      <div className="lyrics-scroll">
         {lyrics.map((line, i) => {
-          const isActive  = i === currentIndex;
-          const isPast    = i < currentIndex;
-          const isFuture  = i > currentIndex;
+          const isActive = i === currentIndex;
+          const isPast   = i < currentIndex;
 
           return (
             <div
               key={i}
               ref={(el) => (lineRefs.current[i] = el)}
               style={{
-                padding:       "6px 0",
-                fontSize:      isActive ? 22 : 16,
+                padding: "5px 0",
+                // Clamp font size — large on desktop, readable on mobile
+                fontSize: isActive
+                  ? "clamp(16px, 5vw, 22px)"
+                  : "clamp(13px, 3.5vw, 16px)",
                 fontWeight:    isActive ? 800 : 400,
                 lineHeight:    1.5,
                 textAlign:     "center",
@@ -114,7 +105,6 @@ if (container && line) {
                   : "rgba(240,240,240,0.45)",
                 transition:    "all 0.3s ease",
                 transform:     isActive ? "scale(1.02)" : "scale(1)",
-                cursor:        "default",
                 letterSpacing: isActive ? "-0.3px" : "normal",
               }}
             >
@@ -122,8 +112,7 @@ if (container && line) {
             </div>
           );
         })}
-        {/* Bottom padding so last line can scroll to center */}
-        <div style={{ height: 180 }} />
+        <div style={{ height: 120 }} />
       </div>
     </div>
   );
