@@ -1,6 +1,7 @@
 /**
  * lib/search.js
- * YouTube and SoundCloud search — API keys stay server-side, never sent to clients.
+ * YouTube, SoundCloud search + LRCLIB lyrics fetching.
+ * All API keys stay server-side, never sent to clients.
  */
 "use strict";
 
@@ -15,8 +16,6 @@ function sanitizeQuery(q) {
 
 /**
  * Search YouTube for a music video matching the query.
- * Uses videoCategoryId=10 (Music) to bias results toward official tracks.
- * Returns { id, title, thumbnail } or null.
  */
 async function searchYouTube(query) {
   try {
@@ -27,7 +26,7 @@ async function searchYouTube(query) {
         type:            "video",
         videoCategoryId: "10",
         maxResults:      1,
-        key:             process.env.YOUTUBE_API_KEY, // Server-side only
+        key:             process.env.YOUTUBE_API_KEY,
       },
       timeout: TIMEOUT,
     });
@@ -46,7 +45,6 @@ async function searchYouTube(query) {
 
 /**
  * Search SoundCloud for a track matching the query.
- * Returns { id, url, streamUrl } or null.
  */
 async function searchSoundCloud(query) {
   try {
@@ -54,7 +52,7 @@ async function searchSoundCloud(query) {
       params: {
         q:         sanitizeQuery(query),
         limit:     1,
-        client_id: process.env.SOUNDCLOUD_CLIENT_ID, // Server-side only
+        client_id: process.env.SOUNDCLOUD_CLIENT_ID,
       },
       timeout: TIMEOUT,
     });
@@ -72,18 +70,78 @@ async function searchSoundCloud(query) {
 }
 
 /**
- * Search both platforms simultaneously.
- * Returns { youtubeId, soundcloudUrl, soundcloudStreamUrl, source }
+ * Fetch synced lyrics from LRCLIB — free, no API key needed.
+ * Returns an array of { time: milliseconds, text: string } or null.
+ *
+ * LRCLIB returns lyrics in .lrc format:
+ *   [01:23.45] Line of lyrics
+ * We parse this into timed objects the client can use directly.
  */
-async function searchBoth(trackName, artistName) {
+async function fetchLyrics(trackName, artistName, durationMs) {
+  try {
+    const res = await axios.get("https://lrclib.net/api/search", {
+      params: {
+        track_name:   sanitizeQuery(trackName),
+        artist_name:  sanitizeQuery(artistName),
+      },
+      timeout: TIMEOUT,
+      headers: { "User-Agent": "SyncWave/1.0 (https://github.com/syncwave)" },
+    });
+
+    const results = res.data;
+    if (!results?.length) return null;
+
+    // Pick the best match — prefer synced lyrics, prefer duration match
+    let best = null;
+    for (const r of results) {
+      if (!r.syncedLyrics) continue;
+      if (!best) { best = r; continue; }
+      // Prefer closer duration match
+      const durationSec = durationMs / 1000;
+      const diff = Math.abs(r.duration - durationSec);
+      const bestDiff = Math.abs(best.duration - durationSec);
+      if (diff < bestDiff) best = r;
+    }
+
+    if (!best?.syncedLyrics) return null;
+
+    // Parse .lrc format: [mm:ss.xx] lyric line
+    const lines = best.syncedLyrics.split("\n");
+    const parsed = [];
+    const lrcRegex = /^\[(\d{2}):(\d{2})\.(\d{2,3})\]\s*(.*)/;
+
+    for (const line of lines) {
+      const match = line.match(lrcRegex);
+      if (!match) continue;
+      const [, mm, ss, ms, text] = match;
+      const timeMs = (parseInt(mm) * 60 + parseInt(ss)) * 1000 + parseInt(ms.padEnd(3, "0"));
+      parsed.push({ time: timeMs, text: text.trim() });
+    }
+
+    return parsed.length > 0 ? parsed : null;
+  } catch (err) {
+    logger.error("LRCLIB lyrics fetch failed", err);
+    return null;
+  }
+}
+
+/**
+ * Search YouTube + SoundCloud + fetch lyrics simultaneously.
+ */
+async function searchBoth(trackName, artistName, durationMs) {
   const query = sanitizeQuery(`${trackName} ${artistName}`);
-  const [yt, sc] = await Promise.all([searchYouTube(query), searchSoundCloud(query)]);
+  const [yt, sc, lyrics] = await Promise.all([
+    searchYouTube(query),
+    searchSoundCloud(query),
+    fetchLyrics(trackName, artistName, durationMs),
+  ]);
   return {
-    youtubeId:           yt?.id   ?? null,
-    soundcloudUrl:       sc?.url  ?? null,
+    youtubeId:           yt?.id        ?? null,
+    soundcloudUrl:       sc?.url       ?? null,
     soundcloudStreamUrl: sc?.streamUrl ?? null,
     source:              yt ? "youtube" : sc ? "soundcloud" : null,
+    lyrics,  // array of { time, text } or null
   };
 }
 
-module.exports = { searchYouTube, searchSoundCloud, searchBoth };
+module.exports = { searchYouTube, searchSoundCloud, fetchLyrics, searchBoth };

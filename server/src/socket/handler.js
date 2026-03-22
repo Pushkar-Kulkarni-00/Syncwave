@@ -163,6 +163,10 @@ function registerHandlers(io) {
         if (!radio || !radio.is_active) {
   return callback({ error: "Radio not found." });
 }
+// Grant permanent membership when joining via invite code
+if (inviteCode && !radio.is_public) {
+  await db.addRadioMember(radio.id, user.dbUserId);
+}
 
 // Check access for private radios
 if (!radio.is_public) {
@@ -173,10 +177,6 @@ if (!radio.is_public) {
   }
 }
 
-// Grant permanent membership when joining via invite code
-if (inviteCode && !radio.is_public) {
-  await db.addRadioMember(radio.id, user.dbUserId);
-}
 
         // Leave previous room cleanly
         if (user.currentRoomId && user.currentRoomId !== radio.id) {
@@ -202,6 +202,7 @@ if (inviteCode && !radio.is_public) {
     hostName:     radio.host_name,
     hostAvatar:   radio.host_avatar,
     isPublic:     radio.is_public,
+    invite_code:  radio.invite_code,
     currentTrack: radio.current_track,
     listenerCount,
   },

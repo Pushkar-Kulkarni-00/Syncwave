@@ -180,8 +180,7 @@ const worker = new Worker(
     logger.info("New track detected", { radioId, title: track.title });
     lastKnownTrack.set(radioId, track.spotifyId);
 
-    const mediaResults = await search.searchBoth(track.title, track.artist);
-
+const mediaResults = await search.searchBoth(track.title, track.artist, track.durationMs);
     const fullTrack = {
       ...track,
       ...mediaResults,

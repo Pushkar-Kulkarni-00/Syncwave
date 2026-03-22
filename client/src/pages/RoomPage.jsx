@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import NowPlaying from "../components/NowPlaying";
 import YouTubePlayer from "../components/YouTubePlayer";
 import SoundCloudPlayer from "../components/SoundCloudPlayer";
+import LyricsPlayer from "../components/LyricsPlayer";
 
 export default function RoomPage() {
   const { radioId } = useParams();
@@ -112,18 +113,15 @@ const isHost = String(room?.host_id) === String(user?.dbUserId) || room?.isHost;
         </div>
 
         {currentTrack && (
-          <div style={{ animation:"fadeIn 0.4s ease" }}>
-            {source === "youtube" && currentTrack.youtubeId ? (
-              <YouTubePlayer key={currentTrack.youtubeId} videoId={currentTrack.youtubeId} startPositionMs={currentTrack.positionMs} isPlaying={currentTrack.isPlaying} playerRef={playerRef} />
-            ) : source === "soundcloud" && currentTrack.soundcloudUrl ? (
-              <SoundCloudPlayer key={currentTrack.soundcloudUrl} trackUrl={currentTrack.soundcloudUrl} startPositionMs={currentTrack.positionMs} isPlaying={currentTrack.isPlaying} playerRef={playerRef} />
-            ) : (
-              <div style={{ padding:24, background:"var(--surface)", border:"1px solid var(--border)", borderRadius:"var(--radius)", textAlign:"center", color:"var(--muted)", fontSize:14 }}>
-                Could not find this track on YouTube or SoundCloud
-              </div>
-            )}
-          </div>
-        )}
+  <div style={{ animation:"fadeIn 0.4s ease" }}>
+    <LyricsPlayer
+      lyrics={currentTrack.lyrics}
+      positionMs={currentTrack.positionMs}
+      isPlaying={currentTrack.isPlaying}
+      track={currentTrack}
+    />
+  </div>
+)}
       </div>
     </div>
   );

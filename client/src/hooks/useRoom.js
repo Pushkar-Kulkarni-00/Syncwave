@@ -77,8 +77,7 @@ export function useRoom() {
       if (!socket) return reject("Not connected");
       socket.emit("create_radio", { name, isPublic }, (res) => {
         if (res.error) return reject(res.error);
-        setRoom({ id: res.radioId, name, isHost: true, inviteCode: res.inviteCode, inviteUrl: res.inviteUrl });
-        setListenerCount(1);
+setRoom({ id: res.radioId, name, isHost: true, isPublic, inviteCode: res.inviteCode, inviteUrl: res.inviteUrl });        setListenerCount(1);
         resolve(res);
       });
     });
