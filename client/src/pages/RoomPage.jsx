@@ -120,6 +120,18 @@ const isHost = String(room?.host_id) === String(user?.dbUserId) || room?.isHost;
       isPlaying={currentTrack.isPlaying}
       track={currentTrack}
     />
+    {/* YouTube plays audio in background — hidden but active */}
+    {currentTrack.youtubeId && (
+      <div style={{ position:"fixed", bottom:-9999, left:-9999, width:1, height:1, overflow:"hidden", pointerEvents:"none" }}>
+        <YouTubePlayer
+          key={currentTrack.youtubeId}
+          videoId={currentTrack.youtubeId}
+          startPositionMs={currentTrack.positionMs}
+          isPlaying={currentTrack.isPlaying}
+          playerRef={playerRef}
+        />
+      </div>
+    )}
   </div>
 )}
       </div>
