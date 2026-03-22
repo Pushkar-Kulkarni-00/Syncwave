@@ -1,20 +1,11 @@
-# 🎵 SyncWave v3 — Persistent Radios
+# 🎵 SyncWave 
+
+> Currently depreciated thanks to Spotify's new Developer API rules , Deployed link: https://syncwave-amber.vercel.app/
+> (Spotify API rules allow only 5 users to connect their accounts)
+> Working on an updated version without spotify.
 
 > Radios keep broadcasting even when the host closes their browser.
 > Host plays Spotify on any device → server detects it → listeners sync via YouTube or SoundCloud.
-
-## What's new in v3
-
-| Feature | v2 (old) | v3 (this) |
-|---|---|---|
-| Radio persistence | ❌ Dies when host closes tab | ✅ Lives in PostgreSQL forever |
-| Background polling | ❌ Tied to WebSocket connection | ✅ BullMQ job in Redis — survives restarts |
-| Multiple accounts | ❌ In-memory only | ✅ Every user has a DB record |
-| Token storage | ❌ Plain RAM | ✅ AES-256-GCM encrypted in Postgres |
-| Restart recovery | ❌ All state lost | ✅ All active radios resume automatically |
-| My Radios page | ❌ No | ✅ View, open, delete all your radios |
-
----
 
 ## Services you need (all free tier)
 
