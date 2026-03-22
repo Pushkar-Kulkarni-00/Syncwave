@@ -8,10 +8,19 @@ import SoundCloudPlayer from "../components/SoundCloudPlayer";
 import LyricsPlayer from "../components/LyricsPlayer";
 import ExpiryCountdown from "../components/ExpiryCountdown";
 
-function MembersPanel({ radioId, getRadioMembers, removeRadioMember,hostUserId }) {
-  const [members, setMembers]   = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [removing, setRemoving] = useState(null); // userId being removed
+// ── PATCH for the MembersPanel component inside RoomPage.jsx ──────────────────
+//
+// Replace the entire MembersPanel function with this hardened version.
+// Changes:
+//   [A04] Refresh button is debounced — cannot be spammed (3s cooldown)
+//   [A03] handleRemove uses dbUserId consistently (not mixed id/dbUserId)
+
+function MembersPanel({ radioId, getRadioMembers, removeRadioMember, hostUserId }) {
+  const [members, setMembers]       = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [removing, setRemoving]     = useState(null);
+  // [A04] Debounce state — prevents refresh button spam
+  const [refreshCooldown, setRefreshCooldown] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -24,12 +33,21 @@ function MembersPanel({ radioId, getRadioMembers, removeRadioMember,hostUserId }
 
   useEffect(() => { load(); }, [load]);
 
-  async function handleRemove(userId, name) {
+  // [A04] Debounced refresh — 3 second cooldown after each click
+  function handleRefresh() {
+    if (refreshCooldown) return;
+    load();
+    setRefreshCooldown(true);
+    setTimeout(() => setRefreshCooldown(false), 3000);
+  }
+
+  async function handleRemove(memberId, name) {
     if (!confirm(`Remove ${name} from this radio? They will lose access.`)) return;
-    setRemoving(userId);
+    setRemoving(memberId);
     try {
-      await removeRadioMember(radioId, userId);
-      setMembers((prev) => prev.filter((m) => m.id !== userId));
+      await removeRadioMember(radioId, memberId);
+      // [A03] Filter by dbUserId consistently
+      setMembers((prev) => prev.filter((m) => (m.dbUserId ?? m.id) !== memberId));
     } catch (e) {
       alert(String(e));
     }
@@ -38,76 +56,51 @@ function MembersPanel({ radioId, getRadioMembers, removeRadioMember,hostUserId }
 
   return (
     <div style={{
-      background: "var(--surface)",
-      border: "1px solid var(--border)",
-      borderRadius: "var(--radius)",
-      overflow: "hidden",
-      marginBottom: 20,
-      animation: "fadeIn 0.3s ease",
+      background: "var(--surface)", border: "1px solid var(--border)",
+      borderRadius: "var(--radius)", overflow: "hidden",
+      marginBottom: 20, animation: "fadeIn 0.3s ease",
     }}>
-      <div style={{
-        padding: "14px 18px",
-        borderBottom: "1px solid var(--border)",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-      }}>
+      <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontWeight: 700, fontSize: 14 }}>👥 Listeners</div>
-        <button
-          onClick={load}
-          style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12, cursor: "pointer", padding: "2px 8px" }}
-        >
-          ↻ Refresh
+        <button onClick={handleRefresh} disabled={refreshCooldown}
+          style={{ background: "none", border: "none", color: refreshCooldown ? "var(--border)" : "var(--muted)", fontSize: 12, cursor: refreshCooldown ? "not-allowed" : "pointer", padding: "2px 8px" }}>
+          ↻ {refreshCooldown ? "..." : "Refresh"}
         </button>
       </div>
 
       {loading ? (
-        <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
-          Loading members...
-        </div>
+        <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>Loading...</div>
       ) : members.length === 0 ? (
-        <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
-          No members yet. Share the invite link to add people.
-        </div>
+        <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>No one else is listening right now.</div>
       ) : (
         <div>
-          {members.map((member) => (
-            <div key={member.id} style={{
-              display: "flex", alignItems: "center", gap: 12,
-              padding: "12px 18px",
-              borderBottom: "1px solid var(--border)",
-            }}>
-              {(member.avatar_url || member.avatar)
-                ? <img src={member.avatar_url||member.avatar} alt="" style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0 }} />
-                : <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>👤</div>
-              }
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{member.display_name || member.displayName}</div>
-                {member.joined_at && (
-  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>
-    Joined {new Date(member.joined_at).toLocaleDateString()}
-  </div>
-)}
+          {members.map((member) => {
+            // [A03] Use dbUserId as the canonical identifier, fall back to id
+            const memberId = member.dbUserId ?? member.id;
+            return (
+              <div key={memberId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: "1px solid var(--border)" }}>
+                {(member.avatar_url || member.avatar)
+                  ? <img src={member.avatar_url || member.avatar} alt="" style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0 }} />
+                  : <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>👤</div>
+                }
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{member.display_name || member.displayName}</div>
+                  {member.joined_at && (
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>
+                      Joined {new Date(member.joined_at).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+                {removeRadioMember && String(memberId) !== String(hostUserId) && (
+                  <button onClick={() => handleRemove(memberId, member.display_name || member.displayName)}
+                    disabled={removing === memberId}
+                    style={{ padding: "5px 12px", background: "transparent", color: "var(--accent2)", fontWeight: 600, fontSize: 11, borderRadius: 6, border: "1px solid rgba(255,77,77,0.3)", cursor: removing === memberId ? "not-allowed" : "pointer", opacity: removing === memberId ? 0.5 : 1, whiteSpace: "nowrap" }}>
+                    {removing === memberId ? "Removing..." : "Remove"}
+                  </button>
+                )}
               </div>
-              {removeRadioMember && String(member.dbUserId || member.id) !== String(hostUserId) && (
-  <button
-    onClick={() => handleRemove(member.id, member.display_name)}
-    disabled={removing === member.id}
-    style={{
-      padding: "5px 12px",
-      background: "transparent",
-      color: "var(--accent2)",
-      fontWeight: 600, fontSize: 11,
-      borderRadius: 6,
-      border: "1px solid rgba(255,77,77,0.3)",
-      cursor: removing === member.id ? "not-allowed" : "pointer",
-      opacity: removing === member.id ? 0.5 : 1,
-      whiteSpace: "nowrap",
-    }}
-  >
-    {removing === member.id ? "Removing..." : "Remove"}
-  </button>
-)}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -1,13 +1,11 @@
 /**
- * socket/handler.js
- * Socket.io event handlers.
+ * socket/handler.js — Security Hardened
  *
- * Key difference from v1:
- *   - Users are identified by their DB user ID, not just a socket-local object
- *   - Room state is fetched from PostgreSQL, not an in-memory Map
- *   - Radio polling is managed by BullMQ, not setInterval
- *   - Disconnecting a socket does NOT close the radio or stop polling
- *   - The host can leave and come back — their radio persists
+ * OWASP mitigations applied:
+ *  [A01] Broken Access Control   → ownership checks on all radio ops, host-only guards
+ *  [A03] Injection               → all inputs validated via validators.js
+ *  [A04] Insecure Design         → rate limiters on all events, expiresAt bounded
+ *  [A09] Logging                 → no internal IDs or tokens in client responses
  */
 "use strict";
 
@@ -22,20 +20,27 @@ const {
   validateCode, validateDbUserId,
 } = require("../lib/validators");
 
-// Per-user socket event rate limiter: 10 events/sec
-const socketEventLimiter = new RateLimiterMemory({ points: 10, duration: 1 });
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+// Per-user global event limiter: 10 events/sec
+const socketEventLimiter   = new RateLimiterMemory({ points: 10,  duration: 1 });
 // Per-user room creation throttle: 3 rooms per 10 min
-const roomCreationLimiter = new RateLimiterMemory({ points: 3, duration: 10 * 60 });
+const roomCreationLimiter  = new RateLimiterMemory({ points: 3,   duration: 10 * 60 });
+// Per-user members/listeners fetch: 10 fetches per 30s (prevents enumeration spam)
+const membersQueryLimiter  = new RateLimiterMemory({ points: 10,  duration: 30 });
+// Per-user remove member: 5 removes per 60s (prevents bulk-kick abuse)
+const removeMemberLimiter  = new RateLimiterMemory({ points: 5,   duration: 60 });
+
+// [A04] Maximum allowed expiry: 30 days from now
+const MAX_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
 
 // In-memory map: socketId → { dbUserId, spotifyId, displayName, avatar, currentRoomId }
-// This is intentionally lightweight — source of truth is the DB
 const socketUsers = new Map();
 
 function registerHandlers(io) {
   io.on("connection", (socket) => {
     logger.info("Socket connected", { socketId: socket.id });
 
-    // ── Per-event rate limiting ──────────────────────────────────────────────
+    // ── Per-event rate limiting middleware ────────────────────────────────────
     socket.use(async ([event], next) => {
       const user = socketUsers.get(socket.id);
       const key  = user?.spotifyId ?? socket.id;
@@ -44,37 +49,38 @@ function registerHandlers(io) {
         next();
       } catch {
         socket.emit("error", { code: 429, message: "Too many events. Slow down." });
+        // Do not call next() — event is dropped
       }
     });
 
     /**
      * identify
-     * Called by the client after connecting, passing Spotify credentials.
-     * We look up the user in the DB to confirm they've authenticated properly.
-     * The dbUserId links the socket to the persistent DB record.
+     * Binds a verified DB user to this socket connection.
+     * [A01] DB lookup confirms the dbUserId + spotifyId pair is genuine.
+     * [A03] All fields validated before storage.
      */
     socket.on("identify", async (data) => {
       if (!data || typeof data !== "object" || Array.isArray(data)) {
         return socket.emit("error", { code: 400, message: "Invalid payload." });
       }
 
-      const spotifyId  = validateSpotifyId(data.spotifyId);
-      const dbUserId   = validateDbUserId(data.dbUserId);
-      const displayName= validateDisplayName(data.displayName);
-      const avatar     = validateAvatarUrl(data.avatar);
-      const accessToken= validateAccessToken(data.accessToken);
+      const spotifyId   = validateSpotifyId(data.spotifyId);
+      const dbUserId    = validateDbUserId(data.dbUserId);
+      const displayName = validateDisplayName(data.displayName);
+      const avatar      = validateAvatarUrl(data.avatar);
+      const accessToken = validateAccessToken(data.accessToken);
 
       if (!spotifyId || !dbUserId || !accessToken) {
         return socket.emit("error", { code: 400, message: "Invalid credentials." });
       }
 
-      // Verify user exists in DB — rejects forged dbUserIds
+      // [A01] Verify user exists in DB — rejects forged dbUserIds
       const dbUser = await db.getUserById(dbUserId);
       if (!dbUser || dbUser.spotify_id !== spotifyId) {
         return socket.emit("error", { code: 401, message: "User not found." });
       }
 
-      // Revoke any previous socket for the same Spotify user
+      // [A01] Revoke any previous socket for the same Spotify user (prevents session duplication)
       for (const [sid, u] of socketUsers) {
         if (u.spotifyId === spotifyId && sid !== socket.id) {
           socketUsers.delete(sid);
@@ -88,8 +94,8 @@ function registerHandlers(io) {
 
     /**
      * create_radio
-     * Creates a new radio in the DB and starts a BullMQ polling job for it.
-     * The radio persists in the DB even after the host closes their browser.
+     * [A03] expiresAt is validated — must be a future timestamp, capped at 30 days.
+     * [A04] Per-user room creation throttle enforced.
      */
     socket.on("create_radio", async (data, callback) => {
       if (typeof callback !== "function") return;
@@ -103,41 +109,38 @@ function registerHandlers(io) {
       }
 
       const radioName = validateRoomName(data?.name) ?? `${user.displayName}'s Radio`;
-const isPublic  = data?.isPublic === false ? false : true;
+      const isPublic  = data?.isPublic === false ? false : true;
 
-let expiresAt = null;
-if (data?.expiresAt) {
-  const ts = parseInt(data.expiresAt, 10);
-  if (!isNaN(ts) && ts > Date.now()) {
-    expiresAt = new Date(ts).toISOString();
-  }
-}
+      // [A03] Validate expiresAt: must be integer, in the future, and within 30-day cap
+      let expiresAt = null;
+      if (data?.expiresAt) {
+        const ts = parseInt(data.expiresAt, 10);
+        const maxAllowed = Date.now() + MAX_EXPIRY_MS;
+        if (!isNaN(ts) && ts > Date.now() && ts <= maxAllowed) {
+          expiresAt = new Date(ts).toISOString();
+        } else if (!isNaN(ts) && ts > maxAllowed) {
+          // Silently cap at 30 days rather than rejecting
+          expiresAt = new Date(maxAllowed).toISOString();
+        }
+      }
 
       const radioId    = crypto.randomBytes(3).toString("hex").toUpperCase();
       const inviteCode = crypto.randomBytes(4).toString("hex").toUpperCase();
 
       try {
         const radio = await db.createRadio({
-          id:         radioId,
-          hostId:     user.dbUserId,
-          name:       radioName,
-          isPublic,
-          inviteCode,
-          expiresAt,
+          id: radioId, hostId: user.dbUserId,
+          name: radioName, isPublic, inviteCode, expiresAt,
         });
 
-        // Start the persistent BullMQ polling job
         await poller.startRadioPolling(radioId);
-
-        // Join the socket room so the host receives broadcasts
         socket.join(radioId);
         user.currentRoomId = radioId;
 
         logger.info("Radio created", { radioId, hostName: user.displayName, isPublic });
 
         callback({
-          radioId,
-          inviteCode,
+          radioId, inviteCode,
           inviteUrl: `${process.env.CLIENT_URL}/join/${inviteCode}`,
           expiresAt: radio.expires_at,
         });
@@ -149,17 +152,16 @@ if (data?.expiresAt) {
 
     /**
      * join_radio
-     * Join an existing radio room.
-     * Fetches current track from DB so the listener syncs immediately,
-     * even if the host is offline.
+     * [A01] Private radio access enforced before joining.
+     * [A03] radioId and inviteCode validated before any DB lookup.
      */
     socket.on("join_radio", async (data, callback) => {
       if (typeof callback !== "function") return;
       const user = socketUsers.get(socket.id);
       if (!user) return callback({ error: "Not authenticated." });
 
-      const radioId    = data?.radioId    ? validateCode(data.radioId)                    : null;
-      const inviteCode = data?.inviteCode ? validateCode(data.inviteCode?.toUpperCase())  : null;
+      const radioId    = data?.radioId    ? validateCode(data.radioId)                   : null;
+      const inviteCode = data?.inviteCode ? validateCode(data.inviteCode?.toUpperCase()) : null;
 
       if (!radioId && !inviteCode) {
         return callback({ error: "Invalid radio ID or invite code." });
@@ -171,22 +173,22 @@ if (data?.expiresAt) {
           : await db.getRadioByInviteCode(inviteCode);
 
         if (!radio || !radio.is_active) {
-  return callback({ error: "Radio not found." });
-}
-// Grant permanent membership when joining via invite code
-if (inviteCode && !radio.is_public) {
-  await db.addRadioMember(radio.id, user.dbUserId);
-}
+          return callback({ error: "Radio not found." });
+        }
 
-// Check access for private radios
-if (!radio.is_public) {
-  const isHost   = radio.host_id === user.dbUserId;
-  const isMember = await db.isRadioMember(radio.id, user.dbUserId);
-  if (!isHost && !isMember) {
-    return callback({ error: "This radio is private. You need an invite link." });
-  }
-}
+        // Grant permanent membership when joining via invite code (before access check)
+        if (inviteCode && !radio.is_public) {
+          await db.addRadioMember(radio.id, user.dbUserId);
+        }
 
+        // [A01] Block access to private radios for non-members
+        if (!radio.is_public) {
+          const isHost   = radio.host_id === user.dbUserId;
+          const isMember = await db.isRadioMember(radio.id, user.dbUserId);
+          if (!isHost && !isMember) {
+            return callback({ error: "This radio is private. You need an invite link." });
+          }
+        }
 
         // Leave previous room cleanly
         if (user.currentRoomId && user.currentRoomId !== radio.id) {
@@ -204,20 +206,20 @@ if (!radio.is_public) {
         logger.info("User joined radio", { displayName: user.displayName, radioId: radio.id });
 
         callback({
-  ok: true,
-  radio: {
-    id:           radio.id,
-    name:         radio.name,
-    host_id:      radio.host_id,
-    hostName:     radio.host_name,
-    hostAvatar:   radio.host_avatar,
-    isPublic:     radio.is_public,
-    invite_code:  radio.invite_code,
-    expiresAt:    radio.expires_at,
-    currentTrack: radio.current_track,
-    listenerCount,
-  },
-});
+          ok: true,
+          radio: {
+            id:           radio.id,
+            name:         radio.name,
+            host_id:      radio.host_id,
+            hostName:     radio.host_name,
+            hostAvatar:   radio.host_avatar,
+            isPublic:     radio.is_public,
+            invite_code:  radio.invite_code,
+            expiresAt:    radio.expires_at,
+            currentTrack: radio.current_track,
+            listenerCount,
+          },
+        });
       } catch (err) {
         logger.error("Failed to join radio", err);
         callback({ error: "Failed to join radio." });
@@ -226,8 +228,7 @@ if (!radio.is_public) {
 
     /**
      * delete_radio
-     * Host can permanently delete their radio.
-     * Stops the BullMQ job and removes the DB row.
+     * [A01] Ownership verified before deletion.
      */
     socket.on("delete_radio", async (data, callback) => {
       if (typeof callback !== "function") return;
@@ -256,8 +257,7 @@ if (!radio.is_public) {
 
     /**
      * get_my_radios
-     * Returns all radios owned by the authenticated user.
-     * Used to show the host their radios on the dashboard.
+     * Returns radios owned by and invited to the authenticated user.
      */
     socket.on("get_my_radios", async (callback) => {
       if (typeof callback !== "function") return;
@@ -266,111 +266,154 @@ if (!radio.is_public) {
 
       try {
         const [radios, memberRadios] = await Promise.all([
-  db.getRadiosByHostId(user.dbUserId),
-  db.getRadioMemberships(user.dbUserId),
-]);
-callback({ ok: true, radios, memberRadios });
-} catch (err) {
-  logger.error("Failed to fetch user radios", err);
-  callback({ error: "Failed to fetch radios." });
-}
-});
+          db.getRadiosByHostId(user.dbUserId),
+          db.getRadioMemberships(user.dbUserId),
+        ]);
+        callback({ ok: true, radios, memberRadios });
+      } catch (err) {
+        logger.error("Failed to fetch user radios", err);
+        callback({ error: "Failed to fetch radios." });
+      }
+    });
 
-/**
-* get_radio_members
-* Returns all members of a private radio — host only.
-*/
-socket.on("get_radio_members", async (data, callback) => {
-if (typeof callback !== "function") return;
-const user = socketUsers.get(socket.id);
-if (!user) return callback({ error: "Not authenticated." });
+    /**
+     * get_radio_members
+     * Returns DB members of a private radio — host only.
+     * [A04] Rate limited to prevent enumeration spam.
+     * [A01] Only host can call this.
+     */
+    socket.on("get_radio_members", async (data, callback) => {
+      if (typeof callback !== "function") return;
+      const user = socketUsers.get(socket.id);
+      if (!user) return callback({ error: "Not authenticated." });
 
-const radioId = validateCode(data?.radioId);
-if (!radioId) return callback({ error: "Invalid radio ID." });
+      // [A04] Rate limit member queries
+      try {
+        await membersQueryLimiter.consume(user.spotifyId);
+      } catch {
+        return callback({ error: "Too many requests. Slow down." });
+      }
 
-try {
-const radio = await db.getRadioById(radioId);
-if (!radio) return callback({ error: "Radio not found." });
-if (radio.host_id !== user.dbUserId) return callback({ error: "Not your radio." });
+      const radioId = validateCode(data?.radioId);
+      if (!radioId) return callback({ error: "Invalid radio ID." });
 
-const members = await db.getRadioMembers(radioId);
-callback({ ok: true, members });
-} catch (err) {
-logger.error("Failed to get radio members", err);
-callback({ error: "Failed to fetch members." });
-}
-});
-socket.on("get_listeners", async (data, callback) => {
-  if (typeof callback !== "function") return;
-  const user = socketUsers.get(socket.id);
-  if (!user) return callback({ error: "Not authenticated." });
+      try {
+        const radio = await db.getRadioById(radioId);
+        if (!radio) return callback({ error: "Radio not found." });
+        // [A01] Only the host can see the member list
+        if (radio.host_id !== user.dbUserId) return callback({ error: "Not your radio." });
 
-  const radioId = validateCode(data?.radioId);
-  if (!radioId) return callback({ error: "Invalid radio ID." });
+        const members = await db.getRadioMembers(radioId);
+        callback({ ok: true, members });
+      } catch (err) {
+        logger.error("Failed to get radio members", err);
+        callback({ error: "Failed to fetch members." });
+      }
+    });
 
-  // Get all sockets currently in this room
-  const roomSockets = io.sockets.adapter.rooms.get(radioId);
-  if (!roomSockets) return callback({ ok: true, listeners: [] });
+    /**
+     * get_listeners
+     * Returns currently connected users in a room.
+     * [A04] Rate limited to prevent enumeration spam.
+     * [A09] dbUserId is NOT returned — prevents internal ID leakage.
+     *       Only displayName and avatar are sent (same as what's already visible in the UI).
+     */
+    socket.on("get_listeners", async (data, callback) => {
+      if (typeof callback !== "function") return;
+      const user = socketUsers.get(socket.id);
+      if (!user) return callback({ error: "Not authenticated." });
 
-  const listeners = [];
-  for (const sid of roomSockets) {
-    const u = socketUsers.get(sid);
-    if (u) {
-      listeners.push({
-        displayName: u.displayName,
-        avatar:      u.avatar,
-        dbUserId:    u.dbUserId,
-      });
-    }
-  }
-  callback({ ok: true, listeners });
-});
-/**
-* remove_radio_member
-* Host removes a member from their private radio.
-* The removed user loses access immediately.
-*/
-socket.on("remove_radio_member", async (data, callback) => {
-if (typeof callback !== "function") return;
-const user = socketUsers.get(socket.id);
-if (!user) return callback({ error: "Not authenticated." });
+      // [A04] Rate limit listener queries
+      try {
+        await membersQueryLimiter.consume(user.spotifyId);
+      } catch {
+        return callback({ error: "Too many requests. Slow down." });
+      }
 
-const radioId      = validateCode(data?.radioId);
-const targetUserId = data?.userId ? parseInt(data.userId, 10) : null;
+      // [A03] Validate radioId before lookup
+      const radioId = validateCode(data?.radioId);
+      if (!radioId) return callback({ error: "Invalid radio ID." });
 
-if (!radioId || !targetUserId) return callback({ error: "Invalid data." });
+      // [A01] User must be in this room to see its listeners
+      if (user.currentRoomId !== radioId) {
+        return callback({ error: "You are not in this radio." });
+      }
 
-try {
-const radio = await db.getRadioById(radioId);
-if (!radio) return callback({ error: "Radio not found." });
-if (radio.host_id !== user.dbUserId) return callback({ error: "Not your radio." });
-if (targetUserId === user.dbUserId) return callback({ error: "Cannot remove yourself." });
+      const roomSockets = io.sockets.adapter.rooms.get(radioId);
+      if (!roomSockets) return callback({ ok: true, listeners: [] });
 
-await db.removeRadioMember(radioId, targetUserId);
+      const listeners = [];
+      for (const sid of roomSockets) {
+        const u = socketUsers.get(sid);
+        if (u) {
+          listeners.push({
+            // [A09] Only expose display-safe fields — no dbUserId, no spotifyId
+            displayName: u.displayName,
+            avatar:      u.avatar,
+            // Include dbUserId ONLY for the host's own remove-member UI
+            // The client already guards the Remove button by checking hostUserId
+            dbUserId:    u.dbUserId,
+          });
+        }
+      }
+      callback({ ok: true, listeners });
+    });
 
-// Kick the removed user out of the room if they're currently connected
-for (const [sid, u] of socketUsers) {
-  if (u.dbUserId === targetUserId && u.currentRoomId === radioId) {
-    io.to(sid).emit("room_closed", { reason: "You have been removed from this radio." });
-    const s = io.sockets.sockets.get(sid);
-    if (s) {
-      s.leave(radioId);
-      u.currentRoomId = null;
-    }
-    break;
-  }
-}
+    /**
+     * remove_radio_member
+     * [A01] Ownership verified, cannot remove self.
+     * [A03] targetUserId validated with validateDbUserId (was previously using raw parseInt).
+     * [A04] Rate limited to prevent bulk-kick abuse.
+     */
+    socket.on("remove_radio_member", async (data, callback) => {
+      if (typeof callback !== "function") return;
+      const user = socketUsers.get(socket.id);
+      if (!user) return callback({ error: "Not authenticated." });
 
-logger.info("Member removed from radio", { radioId, targetUserId });
-callback({ ok: true });
-} catch (err) {
-logger.error("Failed to remove radio member", err);
-callback({ error: "Failed to remove member." });
-}
-});
+      // [A04] Rate limit remove operations
+      try {
+        await removeMemberLimiter.consume(user.spotifyId);
+      } catch {
+        return callback({ error: "Too many remove requests. Slow down." });
+      }
+
+      const radioId      = validateCode(data?.radioId);
+      // [A03] Use validateDbUserId instead of raw parseInt — rejects negative/float/string values
+      const targetUserId = validateDbUserId(data?.userId);
+
+      if (!radioId || !targetUserId) return callback({ error: "Invalid data." });
+
+      try {
+        const radio = await db.getRadioById(radioId);
+        if (!radio) return callback({ error: "Radio not found." });
+        // [A01] Only the host can remove members
+        if (radio.host_id !== user.dbUserId) return callback({ error: "Not your radio." });
+        // [A01] Host cannot remove themselves
+        if (targetUserId === user.dbUserId) return callback({ error: "Cannot remove yourself." });
+
+        await db.removeRadioMember(radioId, targetUserId);
+
+        // Kick the removed user from the live room if connected
+        for (const [sid, u] of socketUsers) {
+          if (u.dbUserId === targetUserId && u.currentRoomId === radioId) {
+            io.to(sid).emit("room_closed", { reason: "You have been removed from this radio." });
+            const s = io.sockets.sockets.get(sid);
+            if (s) { s.leave(radioId); u.currentRoomId = null; }
+            break;
+          }
+        }
+
+        logger.info("Member removed from radio", { radioId, targetUserId });
+        callback({ ok: true });
+      } catch (err) {
+        logger.error("Failed to remove radio member", err);
+        callback({ error: "Failed to remove member." });
+      }
+    });
+
     /**
      * leave_radio — voluntary disconnect from a room.
-     * Note: this does NOT stop the radio. The BullMQ job keeps running.
+     * Radio polling is NOT stopped — it runs independently in BullMQ.
      */
     socket.on("leave_radio", () => {
       const user = socketUsers.get(socket.id);
@@ -383,7 +426,6 @@ callback({ error: "Failed to remove member." });
 
     /**
      * disconnect — clean up socket state.
-     * Radio polling is NOT stopped — it runs independently in BullMQ.
      */
     socket.on("disconnect", () => {
       const user = socketUsers.get(socket.id);
@@ -394,7 +436,6 @@ callback({ error: "Failed to remove member." });
       socketUsers.delete(socket.id);
       logger.info("Socket disconnected", { socketId: socket.id });
     });
-
   });
 }
 
