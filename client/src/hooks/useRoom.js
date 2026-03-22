@@ -75,9 +75,10 @@ export function useRoom() {
   const createRadio = useCallback((name, isPublic) => {
     return new Promise((resolve, reject) => {
       if (!socket) return reject("Not connected");
-      socket.emit("create_radio", { name, isPublic }, (res) => {
+      socket.emit("create_radio", { name, isPublic,expiresAt: expiresAt || null }, (res) => {
         if (res.error) return reject(res.error);
-setRoom({ id: res.radioId, name, isHost: true, isPublic, inviteCode: res.inviteCode, inviteUrl: res.inviteUrl });        setListenerCount(1);
+        setRoom({ id: res.radioId, name, isHost: true, isPublic, inviteCode: res.inviteCode, inviteUrl: res.inviteUrl, expiresAt: res.expiresAt });
+        setListenerCount(1);
         resolve(res);
       });
     });

@@ -6,6 +6,7 @@ import NowPlaying from "../components/NowPlaying";
 import YouTubePlayer from "../components/YouTubePlayer";
 import SoundCloudPlayer from "../components/SoundCloudPlayer";
 import LyricsPlayer from "../components/LyricsPlayer";
+import ExpiryCountdown from "../components/ExpiryCountdown";
 
 export default function RoomPage() {
   const { radioId } = useParams();
@@ -91,9 +92,10 @@ const isHost = String(room?.host_id) === String(user?.dbUserId) || room?.isHost;
         {isHost && (
   <div style={{ background:"rgba(29,185,84,0.08)", border:"1px solid rgba(29,185,84,0.2)", borderRadius:"var(--radius)", padding:"14px 18px", marginBottom:20, fontSize:14, color:"var(--accent)", display:"flex", flexDirection:"column", gap:8 }}>
     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-      <span>🎙</span>
-      <span>You're live — play anything on Spotify. Your radio keeps broadcasting even if you close this tab.</span>
-    </div>
+  <span>🎙</span>
+  <span>You're live — play anything on Spotify. Your radio keeps broadcasting even if you close this tab.</span>
+</div>
+<ExpiryCountdown expiresAt={room?.expiresAt || room?.expires_at} />
     {!room?.isPublic && (room?.inviteCode || room?.invite_code) && (
       <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
         <span style={{ fontSize:12, color:"var(--muted)" }}>🔒 Private — invite link:</span>

@@ -87,12 +87,12 @@ async function updateAccessToken(userId, accessToken) {
  * Create a new radio for a user.
  * Returns the created radio row.
  */
-async function createRadio({ id, hostId, name, isPublic, inviteCode }) {
+async function createRadio({ id, hostId, name, isPublic, inviteCode, expiresAt }) {
   const { rows } = await pool.query(
-    `INSERT INTO radios (id, host_id, name, is_public, invite_code)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO radios (id, host_id, name, is_public, invite_code, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [id, hostId, name, isPublic, inviteCode]
+    [id, hostId, name, isPublic, inviteCode, expiresAt || null]
   );
   return rows[0];
 }
@@ -168,8 +168,8 @@ async function getAllActiveRadios() {
  */
 async function getRadiosByHostId(hostId) {
   const { rows } = await pool.query(
-    `SELECT id, name, is_public, invite_code, is_active, current_track, created_at
-     FROM radios WHERE host_id = $1 ORDER BY created_at DESC`,
+    `SELECT id, name, is_public, invite_code, is_active, current_track, expires_at, created_at
+ FROM radios WHERE host_id = $1 ORDER BY created_at DESC`,
     [hostId]
   );
   return rows;
@@ -233,6 +233,16 @@ async function getRadioMemberships(userId) {
   return rows;
 }
 
+async function getExpiredRadios() {
+  const { rows } = await pool.query(
+    `SELECT id FROM radios
+     WHERE is_active = TRUE
+       AND expires_at IS NOT NULL
+       AND expires_at <= NOW()`
+  );
+  return rows;
+}
+
 module.exports = {
   upsertUser,
   getUserById,
@@ -250,4 +260,5 @@ module.exports = {
   addRadioMember,
   isRadioMember,
   getRadioMemberships,
+  getExpiredRadios,
 };

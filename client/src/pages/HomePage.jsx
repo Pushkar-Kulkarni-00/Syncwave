@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useRoom } from "../hooks/useRoom";
+import ExpiryPicker from "../components/ExpiryPicker";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3001";
 
@@ -95,6 +96,7 @@ const { createRadio, joinRadio, deleteRadio, fetchMyRadios, myRadios, memberRadi
   const [isPublic, setIsPublic]           = useState(true);
   const [creating, setCreating]           = useState(false);
   const [error, setError]                 = useState(null);
+  const [expiresAt, setExpiresAt] = useState(null);
 
   // Load public radios
   useEffect(() => {
@@ -112,7 +114,7 @@ const { createRadio, joinRadio, deleteRadio, fetchMyRadios, myRadios, memberRadi
   async function handleCreate() {
     setCreating(true); setError(null);
     try {
-      const res = await createRadio(radioName, isPublic);
+      const res = await createRadio(radioName, isPublic, expiresAt);
       navigate(`/room/${res.radioId}`);
     } catch (e) { setError(String(e)); setCreating(false); }
   }
@@ -181,6 +183,7 @@ const { createRadio, joinRadio, deleteRadio, fetchMyRadios, myRadios, memberRadi
                   <label style={{ fontSize:12, color:"var(--muted)", display:"block", marginBottom:6 }}>RADIO NAME</label>
                   <input value={radioName} onChange={(e) => setRadioName(e.target.value)} style={{ width:"100%", padding:"10px 14px", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, color:"var(--text)", fontSize:15 }} />
                 </div>
+                <ExpiryPicker value={expiresAt} onChange={setExpiresAt} />
                 <div style={{ marginBottom:24, display:"flex", gap:12 }}>
                   {[true, false].map((pub) => (
                     <button key={String(pub)} onClick={() => setIsPublic(pub)} style={{ padding:"8px 16px", borderRadius:8, fontSize:13, fontWeight:600, background: isPublic===pub ? "var(--accent)" : "var(--surface2)", color: isPublic===pub ? "#000" : "var(--muted)", border:"1px solid var(--border)", cursor:"pointer" }}>

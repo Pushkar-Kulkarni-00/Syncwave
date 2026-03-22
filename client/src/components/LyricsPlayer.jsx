@@ -30,7 +30,7 @@ export default function LyricsPlayer({ lyrics, positionMs, isPlaying, track }) {
       // Find which line we're on
       let idx = -1;
       for (let i = 0; i < lyrics.length; i++) {
-        if (localPos.current >= lyrics[i].time) idx = i;
+        if (localPos.current >= lyrics[i].time+1500) idx = i;
         else break;
       }
       setCurrentIndex(idx);

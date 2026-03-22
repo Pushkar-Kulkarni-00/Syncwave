@@ -101,4 +101,5 @@ server.listen(PORT, async () => {
   // Re-register BullMQ jobs for all active radios in the DB.
   // This means every radio that was running before a restart continues automatically.
   await poller.resumeAllRadios();
+  poller.startExpiryChecker();
 });

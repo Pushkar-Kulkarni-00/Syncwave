@@ -103,7 +103,15 @@ function registerHandlers(io) {
       }
 
       const radioName = validateRoomName(data?.name) ?? `${user.displayName}'s Radio`;
-      const isPublic  = data?.isPublic === false ? false : true;
+const isPublic  = data?.isPublic === false ? false : true;
+
+let expiresAt = null;
+if (data?.expiresAt) {
+  const ts = parseInt(data.expiresAt, 10);
+  if (!isNaN(ts) && ts > Date.now()) {
+    expiresAt = new Date(ts).toISOString();
+  }
+}
 
       const radioId    = crypto.randomBytes(3).toString("hex").toUpperCase();
       const inviteCode = crypto.randomBytes(4).toString("hex").toUpperCase();
@@ -115,6 +123,7 @@ function registerHandlers(io) {
           name:       radioName,
           isPublic,
           inviteCode,
+          expiresAt,
         });
 
         // Start the persistent BullMQ polling job
@@ -130,6 +139,7 @@ function registerHandlers(io) {
           radioId,
           inviteCode,
           inviteUrl: `${process.env.CLIENT_URL}/join/${inviteCode}`,
+          expiresAt: radio.expires_at,
         });
       } catch (err) {
         logger.error("Failed to create radio", err);
@@ -203,6 +213,7 @@ if (!radio.is_public) {
     hostAvatar:   radio.host_avatar,
     isPublic:     radio.is_public,
     invite_code:  radio.invite_code,
+    expiresAt:    radio.expires_at,
     currentTrack: radio.current_track,
     listenerCount,
   },
