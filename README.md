@@ -1,6 +1,6 @@
 # 🎵 SyncWave 
 
-> Currently depreciated thanks to Spotify's new Developer API rules , Deployed link: https://syncwave-amber.vercel.app/\
+> Currently depreciated thanks to Spotify's new Developer API rules , Deployed link: https://syncwave-amber.vercel.app/
 
 > (Spotify API rules allow only 5 users to connect their accounts)
 > Working on an updated version without spotify.
