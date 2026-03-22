@@ -270,12 +270,104 @@ if (!radio.is_public) {
   db.getRadioMemberships(user.dbUserId),
 ]);
 callback({ ok: true, radios, memberRadios });
-      } catch (err) {
-        logger.error("Failed to fetch user radios", err);
-        callback({ error: "Failed to fetch radios." });
-      }
-    });
+} catch (err) {
+  logger.error("Failed to fetch user radios", err);
+  callback({ error: "Failed to fetch radios." });
+}
+});
 
+/**
+* get_radio_members
+* Returns all members of a private radio — host only.
+*/
+socket.on("get_radio_members", async (data, callback) => {
+if (typeof callback !== "function") return;
+const user = socketUsers.get(socket.id);
+if (!user) return callback({ error: "Not authenticated." });
+
+const radioId = validateCode(data?.radioId);
+if (!radioId) return callback({ error: "Invalid radio ID." });
+
+try {
+const radio = await db.getRadioById(radioId);
+if (!radio) return callback({ error: "Radio not found." });
+if (radio.host_id !== user.dbUserId) return callback({ error: "Not your radio." });
+
+const members = await db.getRadioMembers(radioId);
+callback({ ok: true, members });
+} catch (err) {
+logger.error("Failed to get radio members", err);
+callback({ error: "Failed to fetch members." });
+}
+});
+socket.on("get_listeners", async (data, callback) => {
+  if (typeof callback !== "function") return;
+  const user = socketUsers.get(socket.id);
+  if (!user) return callback({ error: "Not authenticated." });
+
+  const radioId = validateCode(data?.radioId);
+  if (!radioId) return callback({ error: "Invalid radio ID." });
+
+  // Get all sockets currently in this room
+  const roomSockets = io.sockets.adapter.rooms.get(radioId);
+  if (!roomSockets) return callback({ ok: true, listeners: [] });
+
+  const listeners = [];
+  for (const sid of roomSockets) {
+    const u = socketUsers.get(sid);
+    if (u) {
+      listeners.push({
+        displayName: u.displayName,
+        avatar:      u.avatar,
+        dbUserId:    u.dbUserId,
+      });
+    }
+  }
+  callback({ ok: true, listeners });
+});
+/**
+* remove_radio_member
+* Host removes a member from their private radio.
+* The removed user loses access immediately.
+*/
+socket.on("remove_radio_member", async (data, callback) => {
+if (typeof callback !== "function") return;
+const user = socketUsers.get(socket.id);
+if (!user) return callback({ error: "Not authenticated." });
+
+const radioId      = validateCode(data?.radioId);
+const targetUserId = data?.userId ? parseInt(data.userId, 10) : null;
+
+if (!radioId || !targetUserId) return callback({ error: "Invalid data." });
+
+try {
+const radio = await db.getRadioById(radioId);
+if (!radio) return callback({ error: "Radio not found." });
+if (radio.host_id !== user.dbUserId) return callback({ error: "Not your radio." });
+if (targetUserId === user.dbUserId) return callback({ error: "Cannot remove yourself." });
+
+await db.removeRadioMember(radioId, targetUserId);
+
+// Kick the removed user out of the room if they're currently connected
+for (const [sid, u] of socketUsers) {
+  if (u.dbUserId === targetUserId && u.currentRoomId === radioId) {
+    io.to(sid).emit("room_closed", { reason: "You have been removed from this radio." });
+    const s = io.sockets.sockets.get(sid);
+    if (s) {
+      s.leave(radioId);
+      u.currentRoomId = null;
+    }
+    break;
+  }
+}
+
+logger.info("Member removed from radio", { radioId, targetUserId });
+callback({ ok: true });
+} catch (err) {
+logger.error("Failed to remove radio member", err);
+callback({ error: "Failed to remove member." });
+}
+});
     /**
      * leave_radio — voluntary disconnect from a room.
      * Note: this does NOT stop the radio. The BullMQ job keeps running.
@@ -302,6 +394,7 @@ callback({ ok: true, radios, memberRadios });
       socketUsers.delete(socket.id);
       logger.info("Socket disconnected", { socketId: socket.id });
     });
+
   });
 }
 

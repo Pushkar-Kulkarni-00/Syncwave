@@ -42,10 +42,14 @@ export default function LyricsPlayer({ lyrics, positionMs, isPlaying, track }) {
   // Auto-scroll to current line
   useEffect(() => {
     if (currentIndex < 0 || !lineRefs.current[currentIndex]) return;
-    lineRefs.current[currentIndex].scrollIntoView({
-      behavior: "smooth",
-      block:    "center",
-    });
+    const container = containerRef.current;
+const line = lineRefs.current[currentIndex];
+if (container && line) {
+  const containerTop = container.getBoundingClientRect().top;
+  const lineTop = line.getBoundingClientRect().top;
+  const offset = lineTop - containerTop - (container.clientHeight / 2) + (line.clientHeight / 2);
+  container.scrollTop += offset;
+}
   }, [currentIndex]);
 
   // No lyrics available

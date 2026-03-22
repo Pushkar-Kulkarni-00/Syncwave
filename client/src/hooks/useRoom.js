@@ -117,6 +117,36 @@ export function useRoom() {
     });
   }, [socket]);
 
+  const getRadioMembers = useCallback((radioId) => {
+  return new Promise((resolve, reject) => {
+    if (!socket) return reject("Not connected");
+    socket.emit("get_radio_members", { radioId }, (res) => {
+      if (res.error) return reject(res.error);
+      resolve(res.members);
+    });
+  });
+}, [socket]);
+
+const removeRadioMember = useCallback((radioId, userId) => {
+  return new Promise((resolve, reject) => {
+    if (!socket) return reject("Not connected");
+    socket.emit("remove_radio_member", { radioId, userId }, (res) => {
+      if (res.error) return reject(res.error);
+      resolve(res);
+    });
+  });
+}, [socket]);
+
+const getListeners = useCallback((radioId) => {
+  return new Promise((resolve, reject) => {
+    if (!socket) return reject("Not connected");
+    socket.emit("get_listeners", { radioId }, (res) => {
+      if (res.error) return reject(res.error);
+      resolve(res.listeners);
+    });
+  });
+}, [socket]);
+
   const fetchMyRadios = useCallback(() => {
     return new Promise((resolve, reject) => {
       if (!socket) return reject("Not connected");
@@ -134,6 +164,8 @@ export function useRoom() {
   return {
   room, currentTrack, listenerCount, source, error, myRadios, memberRadios,
   playerRef, createRadio, joinRadio, leaveRadio, deleteRadio,
-  fetchMyRadios, switchSource, setError,
+  getRadioMembers, removeRadioMember,
+  fetchMyRadios, switchSource, setError,getListeners,
+
 };
 }

@@ -243,6 +243,27 @@ async function getExpiredRadios() {
   return rows;
 }
 
+// Get all members of a private radio with their display names
+async function getRadioMembers(radioId) {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.display_name, u.avatar_url, rm.joined_at
+     FROM radio_members rm
+     JOIN users u ON u.id = rm.user_id
+     WHERE rm.radio_id = $1
+     ORDER BY rm.joined_at ASC`,
+    [radioId]
+  );
+  return rows;
+}
+
+// Remove a member from a private radio
+async function removeRadioMember(radioId, userId) {
+  await pool.query(
+    `DELETE FROM radio_members WHERE radio_id = $1 AND user_id = $2`,
+    [radioId, userId]
+  );
+}
+
 module.exports = {
   upsertUser,
   getUserById,
@@ -261,4 +282,6 @@ module.exports = {
   isRadioMember,
   getRadioMemberships,
   getExpiredRadios,
+  getRadioMembers,
+  removeRadioMember,
 };
