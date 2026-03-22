@@ -87,7 +87,7 @@ function MyRadioRow({ radio, onJoin, onDelete }) {
 export default function HomePage() {
   const { user, logout ,socket,connected} = useAuth();
   const navigate = useNavigate();
-  const { createRadio, joinRadio, deleteRadio, fetchMyRadios, myRadios} = useRoom();
+const { createRadio, joinRadio, deleteRadio, fetchMyRadios, myRadios, memberRadios } = useRoom();
   const [publicRadios, setPublicRadios]   = useState([]);
   const [showCreate, setShowCreate]       = useState(false);
   const [activeTab, setActiveTab]         = useState("discover"); // "discover" | "myradios"
@@ -217,23 +217,54 @@ export default function HomePage() {
         )}
 
         {activeTab === "myradios" && (
+  <>
+    <div style={{ marginBottom:16, padding:"14px 18px", background:"rgba(29,185,84,0.06)", border:"1px solid rgba(29,185,84,0.15)", borderRadius:10, fontSize:13, color:"var(--muted)", lineHeight:1.6 }}>
+      💡 Your radios keep broadcasting even when you close this tab. Listeners will stay synced as long as you're playing music on Spotify.
+    </div>
+
+    {myRadios.length === 0 && memberRadios.length === 0 ? (
+      <div style={{ textAlign:"center", padding:"48px 24px", color:"var(--muted)", fontSize:14, border:"1px dashed var(--border)", borderRadius:"var(--radius)" }}>
+        You haven't created any radios yet. Switch to Discover to create one!
+      </div>
+    ) : (
+      <>
+        {myRadios.length > 0 && (
           <>
-            <div style={{ marginBottom:16, padding:"14px 18px", background:"rgba(29,185,84,0.06)", border:"1px solid rgba(29,185,84,0.15)", borderRadius:10, fontSize:13, color:"var(--muted)", lineHeight:1.6 }}>
-              💡 Your radios keep broadcasting even when you close this tab. Listeners will stay synced as long as you're playing music on Spotify.
+            <div style={{ fontSize:12, color:"var(--muted)", fontWeight:600, marginBottom:8, letterSpacing:"0.05em" }}>YOUR RADIOS</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
+              {myRadios.map((r) => (
+                <MyRadioRow key={r.id} radio={r} onJoin={handleJoin} onDelete={handleDelete} />
+              ))}
             </div>
-            {myRadios.length === 0 ? (
-              <div style={{ textAlign:"center", padding:"48px 24px", color:"var(--muted)", fontSize:14, border:"1px dashed var(--border)", borderRadius:"var(--radius)" }}>
-                You haven't created any radios yet. Switch to Discover to create one!
-              </div>
-            ) : (
-              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                {myRadios.map((r) => (
-                  <MyRadioRow key={r.id} radio={r} onJoin={handleJoin} onDelete={handleDelete} />
-                ))}
-              </div>
-            )}
           </>
         )}
+        {memberRadios.length > 0 && (
+          <>
+            <div style={{ fontSize:12, color:"var(--muted)", fontWeight:600, marginBottom:8, letterSpacing:"0.05em" }}>INVITED RADIOS</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {memberRadios.map((r) => (
+                <div key={r.id} onClick={() => handleJoin(r.id)}
+                  style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:"var(--radius)", cursor:"pointer" }}
+                  onMouseEnter={(e) => e.currentTarget.style.borderColor="rgba(255,255,255,0.2)"}
+                  onMouseLeave={(e) => e.currentTarget.style.borderColor="var(--border)"}
+                >
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:600, fontSize:14 }}>{r.name}</div>
+                    <div style={{ fontSize:11, color:"var(--muted)", marginTop:2 }}>by {r.host_name}</div>
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); handleJoin(r.id); }}
+                    style={{ padding:"6px 14px", background:"var(--surface2)", color:"var(--text)", fontWeight:600, fontSize:12, borderRadius:8, border:"1px solid var(--border)", cursor:"pointer" }}>
+                    Join
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </>
+    )}
+  </>
+)}
       </div>
     </div>
   );

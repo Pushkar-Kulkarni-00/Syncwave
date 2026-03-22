@@ -15,7 +15,8 @@ export function useRoom() {
   const [listenerCount, setListenerCount] = useState(0);
   const [source, setSource]           = useState("youtube");
   const [error, setError]             = useState(null);
-  const [myRadios, setMyRadios]       = useState([]);
+  const [myRadios, setMyRadios]         = useState([]);
+  const [memberRadios, setMemberRadios] = useState([]);
 
   const playerRef    = useRef(null);
   const lastTrackId  = useRef(null);
@@ -120,18 +121,19 @@ export function useRoom() {
     return new Promise((resolve, reject) => {
       if (!socket) return reject("Not connected");
       socket.emit("get_my_radios", (res) => {
-        if (res.error) return reject(res.error);
-        setMyRadios(res.radios);
-        resolve(res.radios);
-      });
+ if (res.error) return reject(res.error);
+  setMyRadios(res.radios);
+  setMemberRadios(res.memberRadios || []);
+  resolve(res.radios);
+});
     });
   }, [socket]);
 
   const switchSource = useCallback((s) => setSource(s), []);
 
   return {
-    room, currentTrack, listenerCount, source, error, myRadios,
-    playerRef, createRadio, joinRadio, leaveRadio, deleteRadio,
-    fetchMyRadios, switchSource, setError,
-  };
+  room, currentTrack, listenerCount, source, error, myRadios, memberRadios,
+  playerRef, createRadio, joinRadio, leaveRadio, deleteRadio,
+  fetchMyRadios, switchSource, setError,
+};
 }

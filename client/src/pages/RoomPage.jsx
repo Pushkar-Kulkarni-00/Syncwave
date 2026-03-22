@@ -94,13 +94,13 @@ const isHost = String(room?.host_id) === String(user?.dbUserId) || room?.isHost;
       <span>You're live — play anything on Spotify. Your radio keeps broadcasting even if you close this tab.</span>
     </div>
     {!room?.isPublic && (room?.inviteCode || room?.invite_code) && (
-      <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4 }}>
-        <span style={{ fontSize:12, color:"var(--muted)" }}>🔒 Private radio — invite link:</span>
-        <code style={{ fontSize:11, background:"var(--surface2)", padding:"3px 8px", borderRadius:6, color:"var(--text)", fontFamily:"var(--mono)", wordBreak:"break-all" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+        <span style={{ fontSize:12, color:"var(--muted)" }}>🔒 Private — invite link:</span>
+        <code style={{ fontSize:11, background:"var(--surface2)", padding:"3px 8px", borderRadius:6, color:"var(--text)", fontFamily:"var(--mono)", wordBreak:"break-all", flex:1 }}>
           {`${window.location.origin}/join/${room?.inviteCode || room?.invite_code}`}
         </code>
         <button onClick={copyInvite} style={{ padding:"4px 10px", background: copied ? "var(--accent)" : "var(--surface2)", color: copied ? "#000" : "var(--muted)", fontSize:11, fontWeight:600, borderRadius:6, border:"1px solid var(--border)", cursor:"pointer", whiteSpace:"nowrap" }}>
-          {copied ? "✓" : "Copy"}
+          {copied ? "✓ Copied!" : "Copy Link"}
         </button>
       </div>
     )}
