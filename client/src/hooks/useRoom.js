@@ -72,7 +72,7 @@ export function useRoom() {
     };
   }, [socket, source]);
 
-  const createRadio = useCallback((name, isPublic) => {
+  const createRadio = useCallback((name, isPublic, expiresAt) => {
     return new Promise((resolve, reject) => {
       if (!socket) return reject("Not connected");
       socket.emit("create_radio", { name, isPublic,expiresAt: expiresAt || null }, (res) => {
