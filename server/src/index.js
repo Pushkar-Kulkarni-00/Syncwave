@@ -25,6 +25,8 @@ if (missing.length) {
   process.exit(1);
 }
 
+
+
 const express    = require("express");
 const http       = require("http");
 const { Server } = require("socket.io");
@@ -39,7 +41,7 @@ const poller       = require("./queues/radioPoller");
 const logger       = require("./lib/logger");
 
 const TRUSTED_ORIGIN = process.env.CLIENT_URL;
-
+const TRUSTED_ORIGIN_MOBILE = process.env.CLIENT_URL_MOBILE;
 const app    = express();
 const server = http.createServer(app);
 
@@ -48,7 +50,7 @@ app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false 
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || origin === TRUSTED_ORIGIN) return cb(null, true);
+    if (!origin || origin === TRUSTED_ORIGIN || origin === TRUSTED_ORIGIN_MOBILE) return cb(null, true);
     cb(new Error("CORS: origin not allowed"));
   },
   credentials: true,
@@ -79,7 +81,7 @@ app.use((err, req, res, _next) => {
 
 // ── Socket.io ─────────────────────────────────────────────────────────────────
 const io = new Server(server, {
-  cors: { origin: TRUSTED_ORIGIN, methods: ["GET", "POST"], credentials: true },
+  cors: { origin: [TRUSTED_ORIGIN, TRUSTED_ORIGIN_MOBILE].filter(Boolean), methods: ["GET", "POST"], credentials: true },
   maxHttpBufferSize: 16 * 1024,
   pingTimeout: 20_000,
   pingInterval: 25_000,
