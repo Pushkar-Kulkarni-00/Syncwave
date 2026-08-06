@@ -43,6 +43,7 @@ const logger       = require("./lib/logger");
 const TRUSTED_ORIGIN = process.env.CLIENT_URL;
 const TRUSTED_ORIGIN_MOBILE = process.env.CLIENT_URL_MOBILE;
 const app    = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // ── Security middleware ────────────────────────────────────────────────────────
